@@ -1,0 +1,69 @@
+Bootstrap: docker
+From: nvidia/cuda:11.7.1-cudnn8-runtime-ubuntu20.04
+
+%help
+    Docker image for running Hugging Face LLaMA pipelines on HPC.
+
+%environment
+    export TZ='Europe/Dublin'
+    export PATH="/opt/env/bin:$PATH"
+    export LD_LIBRARY_PATH="/usr/local/cuda/lib64:$LD_LIBRARY_PATH"
+
+%post
+    # Set timezone
+    export TZ="Europe/Dublin"
+    ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
+    # Update system and install basic dependencies
+    export DEBIAN_FRONTEND=noninteractive
+    apt update && apt install -y --no-install-recommends \
+        build-essential \
+        python3-dev \
+        python3-pip \
+        python3-venv \
+        git \
+        wget \
+        curl \
+        libssl-dev \
+        libffi-dev \
+        zlib1g-dev \
+        nano
+
+    # Clean up apt cache to reduce image size
+    apt clean && apt autoremove -y
+
+    # Create a virtual environment and upgrade pip
+    python3 -m venv /opt/env
+    . /opt/env/bin/activate
+    pip install --no-cache-dir --upgrade pip setuptools wheel
+
+    # Install PyTorch with CUDA support
+    pip install --no-cache-dir \
+        torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu117
+
+    # Install Hugging Face libraries
+    pip install --no-cache-dir \
+        transformers \
+        accelerate \
+        bitsandbytes \
+        sentencepiece \
+        datasets \
+        numpy \
+        tqdm \
+        huggingface_hub \
+        peft \
+        zstandard 
+
+#smoothquant \
+#auto-gptq \
+        
+
+%runscript
+    # Default execution command for the container
+    echo "Running Hugging Face LLaMA pipeline"
+    exec python3 "$@"
+
+%labels
+    Maintainer "Hsin-Hung"
+    Version "1.1"
+    Description "Container for running Hugging Face pipelines on HPC"
