@@ -5,7 +5,7 @@ from huggingface_hub import login
 import os
 from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
 from torch.nn.utils import prune
-from evaluate import evaluate_2, get_model_size, get_compressed_model_size
+from evaluate import evaluate, evaluate_2, get_model_size, get_compressed_model_size
 
 Byte = 8
 KiB = 1024 * Byte
@@ -24,7 +24,7 @@ model_id = "meta-llama/Llama-3.1-8B"
 # Load the model with 8-bit quantization
 model = AutoModelForCausalLM.from_pretrained(
     model_id,
-    load_in_4bit=True, # 8bit int
+    #load_in_4bit=True, # 8bit int
     device_map="auto"
 )
 #load_in_8bit (bool, optional, defaults to False) — This flag is used to enable 8-bit quantization with LLM.int8().

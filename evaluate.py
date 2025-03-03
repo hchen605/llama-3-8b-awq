@@ -12,7 +12,8 @@ def evaluate(model, tokenizer):
     testenc = tokenizer("\n\n".join(testenc['text']), return_tensors='pt')
 
     testenc = testenc.input_ids.to(model.device)
-    nsamples = 40
+    nsamples = testenc.numel() // 2048
+    #nsamples = 40
     model = model.eval()
 
     nlls = []
@@ -36,7 +37,7 @@ def evaluate_2(model, tokenizer, nsamples=40, seq_length=2048):
     # Tokenize the dataset and handle large inputs
     tokenized_text = tokenizer("\n\n".join(dataset['text']), return_tensors='pt', truncation=False)
     input_ids = tokenized_text['input_ids'].to(model.device)
-
+    nsamples = input_ids.numel() // 2048
     # Ensure model is in evaluation mode
     model.eval()
 
@@ -91,3 +92,125 @@ def get_compressed_model_size(model: nn.Module, data_width=16):
         num_elements += param.nonzero().size(0)  # Count non-zero weights
     return num_elements * data_width
 
+def get_model_info(model: nn.Module):
+
+    num_elements = 0
+    for param in model.parameters():
+        num_elements += param.numel()
+
+    print('Parameter number: ', num_elements)
+
+    for name, param in model.named_parameters():
+        print(f"Parameter: {name}, Shape: {param.shape}, Data Type: {param.dtype}")
+
+def get_quantized_model_size(model: nn.Module, data_width=16, quantized_data_width=8, group_size=-1):
+    """
+    Calculate the model size in memory or storage, accounting for quantized and non-quantized parameters.
+
+    Args:
+        model (nn.Module): The model to analyze.
+        data_width (int): Bit-width for non-quantized parameters (default: 16 for fp16).
+        quantized_data_width (int): Bit-width for quantized parameters (default: 8 for int8).
+        group_size (int): Group size for quantization (default: -1 for no grouping).
+
+    Returns:
+        float: Estimated model size in bytes.
+    """
+
+    # Adjust quantized data width for grouping overhead
+    if group_size != -1:
+        quantized_data_width += (16 + 4) / group_size
+
+    # Convert data widths from bits to bytes
+    #data_width /= 8
+    #quantized_data_width /= 8
+
+    total_size = 0
+
+    # Iterate over model parameters
+    for name, param in model.named_parameters():
+        # Check if the parameter belongs to an nn.Linear layer
+        is_linear_weight = any(
+            isinstance(module, nn.Linear) and hasattr(module, "weight") and param is getattr(module, "weight", None)
+            for module in model.modules()
+        )
+
+        if is_linear_weight:
+            # Apply quantized size for Linear layer weights
+            total_size += param.numel() * quantized_data_width
+        else:
+            # Apply regular size for non-quantized parameters
+            total_size += param.numel() * data_width
+
+    return total_size
+
+
+def get_pruned_quantized_model_size(
+    model: nn.Module,
+    data_width: int = 16,
+    quantized_data_width: int = 8,
+    group_size: int = -1,
+    exclude_pruned_zeros: bool = False
+) -> float:
+    """
+    Calculate the model size in bits (or bytes) accounting for quantized and non-quantized parameters,
+    with optional exclusion of zeroed-out weights for unstructured pruning.
+
+    Args:
+        model (nn.Module): The model to analyze.
+        data_width (int): Bit-width for non-quantized parameters (default: 16 for FP16).
+        quantized_data_width (int): Bit-width for quantized parameters (default: 8 for int8).
+        group_size (int): Group size for quantization (default: -1 for no grouping).
+        exclude_pruned_zeros (bool): If True, and if pruning is unstructured (zeroes),
+                                      do not count zeroed weights toward the size. 
+                                      This simulates a sparse storage scenario.
+
+    Returns:
+        float: Estimated model size in bits (or bytes, depending on usage).
+    """
+
+    # If your original code wants the result in *bytes*, 
+    # convert data_width from bits -> bytes: data_width /= 8
+    # But if you want the result directly in *bits*, keep as is.
+    # For clarity here, I'll assume we are counting bits.
+    # If you prefer bytes, just do data_width /= 8, etc.
+    # data_width /= 8
+    # quantized_data_width /= 8
+
+    # Adjust quantized data width for grouping overhead if relevant
+    # (e.g., storing extra metadata per group)
+    if group_size != -1:
+        # Example overhead: 16 bits for scale, 4 bits for zero_point, per group
+        # This is just a conceptual example; adjust as needed.
+        overhead_per_group = 16 + 4  # bits
+        quantized_data_width += overhead_per_group / group_size
+
+    total_size = 0.0
+
+    # Identify the set of linear weight parameters (to treat them as quantized)
+    linear_weight_params = set()
+    for module in model.modules():
+        if isinstance(module, nn.Linear) and hasattr(module, 'weight') and module.weight is not None:
+            linear_weight_params.add(module.weight)
+
+    for param_name, param in model.named_parameters():
+        # Check if this parameter is one of the linear weights
+        if param in linear_weight_params:
+            # Quantized parameter
+            if exclude_pruned_zeros:
+                # Count only nonzero weights if we want to exclude pruned zeros
+                num_elems = param.nonzero().size(0)
+            else:
+                # Otherwise, count all (including zeroed weights)
+                num_elems = param.numel()
+            total_size += num_elems * quantized_data_width
+        else:
+            # Normal (non-quantized) parameter
+            if exclude_pruned_zeros:
+                # Same logic: only count nonzero if you want to ignore zeros
+                num_elems = param.nonzero().size(0)
+            else:
+                num_elems = param.numel()
+            total_size += num_elems * data_width
+
+    return total_size
